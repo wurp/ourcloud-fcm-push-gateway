@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/wurp/ourcloud-fcm-push-gateway/internal/config"
+	"github.com/wurp/ourcloud-fcm-push-gateway/internal/handler"
 	"github.com/wurp/ourcloud-fcm-push-gateway/internal/ourcloud"
 )
 
@@ -36,6 +37,9 @@ func main() {
 
 	log.Printf("Connected to OurCloud node at %s", cfg.OurCloud.GRPCAddress)
 
+	// Initialize handlers
+	pushHandler := handler.NewPushHandler(ocClient)
+
 	r := chi.NewRouter()
 
 	// Middleware
@@ -45,6 +49,7 @@ func main() {
 
 	// Routes
 	r.Get("/health", makeHealthHandler(ocClient))
+	r.Post("/push", pushHandler.HandlePush)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),

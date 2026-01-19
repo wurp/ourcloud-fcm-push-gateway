@@ -6,6 +6,7 @@ toolchain go1.24.5
 
 require (
 	github.com/go-chi/chi/v5 v5.0.12
+	github.com/google/uuid v1.6.0
 	github.com/wurp/friendly-backup-reboot/src/go/ourcloud-client v0.0.0
 	github.com/wurp/friendly-backup-reboot/src/go/ourcloud-proto v0.0.0
 	google.golang.org/protobuf v1.36.10
