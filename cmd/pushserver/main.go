@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/wurp/ourcloud-fcm-push-gateway/internal/config"
+	"github.com/wurp/ourcloud-fcm-push-gateway/internal/ourcloud"
 )
 
 func main() {
@@ -26,6 +27,15 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
+	// Initialize OurCloud client
+	ocClient := ourcloud.NewClient(cfg.OurCloud.GRPCAddress)
+	if err := ocClient.Connect(); err != nil {
+		log.Fatalf("Failed to connect to OurCloud node: %v", err)
+	}
+	defer ocClient.Close()
+
+	log.Printf("Connected to OurCloud node at %s", cfg.OurCloud.GRPCAddress)
+
 	r := chi.NewRouter()
 
 	// Middleware
@@ -34,7 +44,7 @@ func main() {
 	r.Use(middleware.RequestID)
 
 	// Routes
-	r.Get("/health", healthHandler)
+	r.Get("/health", makeHealthHandler(ocClient))
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
@@ -68,8 +78,34 @@ func main() {
 	log.Println("Server stopped")
 }
 
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+// HealthResponse represents the JSON response from the health endpoint.
+type HealthResponse struct {
+	Status   string `json:"status"`
+	OurCloud string `json:"ourcloud,omitempty"`
+}
+
+func makeHealthHandler(ocClient *ourcloud.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		resp := HealthResponse{
+			Status:   "ok",
+			OurCloud: "ok",
+		}
+
+		// Check OurCloud connectivity
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		if err := ocClient.HealthCheck(ctx); err != nil {
+			resp.Status = "degraded"
+			resp.OurCloud = fmt.Sprintf("error: %v", err)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}
 }
