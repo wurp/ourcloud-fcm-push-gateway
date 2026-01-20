@@ -77,6 +77,7 @@ func main() {
 
 	// Initialize handlers
 	pushHandler := handler.NewPushHandler(ocClient, b)
+	statusHandler := handler.NewStatusHandler(b)
 
 	r := chi.NewRouter()
 
@@ -88,6 +89,7 @@ func main() {
 	// Routes
 	r.Get("/health", makeHealthHandler(ocClient))
 	r.Post("/push", pushHandler.HandlePush)
+	r.Get("/status/{id}", statusHandler.HandleGetStatus)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
@@ -104,10 +106,32 @@ func main() {
 		}
 	}()
 
+	// Start status cleanup goroutine (runs hourly)
+	cleanupStop := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				deleted, err := st.CleanupExpiredStatus(context.Background())
+				if err != nil {
+					log.Printf("WARNING: status cleanup failed: %v", err)
+				} else if deleted > 0 {
+					log.Printf("Cleaned up %d expired status records", deleted)
+				}
+			case <-cleanupStop:
+				return
+			}
+		}
+	}()
+
 	// Wait for shutdown signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
+
+	close(cleanupStop)
 
 	log.Println("Shutting down server...")
 
