@@ -7,8 +7,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
+	"time"
 
+	"github.com/wurp/ourcloud-fcm-push-gateway/internal/batcher"
+	"github.com/wurp/ourcloud-fcm-push-gateway/internal/store"
 	pb "github.com/wurp/friendly-backup-reboot/src/go/ourcloud-proto"
 	"google.golang.org/protobuf/proto"
 )
@@ -36,8 +40,48 @@ func (m *mockOurCloudClient) GetEndpoints(ctx context.Context, username string) 
 	return m.endpointsResult, m.endpointsErr
 }
 
+// noopSender is a test sender that does nothing.
+type noopSender struct{}
+
+func (s *noopSender) Send(ctx context.Context, fcmToken string, dataIDs [][]byte) error {
+	return nil
+}
+
+// createTestBatcher creates a batcher with an in-memory SQLite database for testing.
+func createTestBatcher(t *testing.T) (*batcher.Batcher, func()) {
+	t.Helper()
+
+	// Create temp file for SQLite
+	tmpFile, err := os.CreateTemp("", "test-*.db")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	st, err := store.New(store.Config{Path: tmpFile.Name()})
+	if err != nil {
+		os.Remove(tmpFile.Name())
+		t.Fatalf("failed to create store: %v", err)
+	}
+
+	b := batcher.New(st, &noopSender{}, batcher.Config{
+		BatchWindow:     60 * time.Second,
+		MaxBatchSize:    100,
+		LockTimeout:     100 * time.Millisecond,
+		StatusRetention: time.Hour,
+	})
+
+	cleanup := func() {
+		b.Stop()
+		st.Close()
+		os.Remove(tmpFile.Name())
+	}
+
+	return b, cleanup
+}
+
 func TestHandlePush_MalformedRequest_EmptyBody(t *testing.T) {
-	h := NewPushHandler(nil)
+	h := NewPushHandlerWithClient(nil, nil) // nil client and batcher - fails before reaching them
 
 	req := httptest.NewRequest(http.MethodPost, "/push", nil)
 	req.Header.Set("Content-Type", "application/x-protobuf")
@@ -55,7 +99,7 @@ func TestHandlePush_MalformedRequest_EmptyBody(t *testing.T) {
 }
 
 func TestHandlePush_MalformedRequest_InvalidContentType(t *testing.T) {
-	h := NewPushHandler(nil)
+	h := NewPushHandlerWithClient(nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/push", bytes.NewReader([]byte("invalid")))
 	req.Header.Set("Content-Type", "application/json")
@@ -73,7 +117,7 @@ func TestHandlePush_MalformedRequest_InvalidContentType(t *testing.T) {
 }
 
 func TestHandlePush_MalformedRequest_InvalidProtobuf(t *testing.T) {
-	h := NewPushHandler(nil)
+	h := NewPushHandlerWithClient(nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/push", bytes.NewReader([]byte("not-valid-protobuf")))
 	req.Header.Set("Content-Type", "application/x-protobuf")
@@ -91,7 +135,7 @@ func TestHandlePush_MalformedRequest_InvalidProtobuf(t *testing.T) {
 }
 
 func TestHandlePush_MalformedRequest_MissingSenderUsername(t *testing.T) {
-	h := NewPushHandler(nil)
+	h := NewPushHandlerWithClient(nil, nil)
 
 	pushReq := &pb.PushRequest{
 		TargetUsername: "bob@oc",
@@ -115,7 +159,7 @@ func TestHandlePush_MalformedRequest_MissingSenderUsername(t *testing.T) {
 }
 
 func TestHandlePush_MalformedRequest_MissingTarget(t *testing.T) {
-	h := NewPushHandler(nil)
+	h := NewPushHandlerWithClient(nil, nil)
 
 	pushReq := &pb.PushRequest{
 		SenderUsername: "alice@oc",
@@ -139,7 +183,7 @@ func TestHandlePush_MalformedRequest_MissingTarget(t *testing.T) {
 }
 
 func TestHandlePush_MalformedRequest_MissingSignature(t *testing.T) {
-	h := NewPushHandler(nil)
+	h := NewPushHandlerWithClient(nil, nil)
 
 	pushReq := &pb.PushRequest{
 		SenderUsername: "alice@oc",
@@ -163,7 +207,7 @@ func TestHandlePush_MalformedRequest_MissingSignature(t *testing.T) {
 }
 
 func TestParseRequest_ValidProtobuf(t *testing.T) {
-	h := NewPushHandler(nil)
+	h := NewPushHandlerWithClient(nil, nil)
 
 	pushReq := &pb.PushRequest{
 		SenderUsername: "alice@oc",
@@ -193,7 +237,7 @@ func TestParseRequest_ValidProtobuf(t *testing.T) {
 }
 
 func TestParseRequest_AcceptsProtobufContentType(t *testing.T) {
-	h := NewPushHandler(nil)
+	h := NewPushHandlerWithClient(nil, nil)
 
 	pushReq := &pb.PushRequest{
 		SenderUsername: "alice@oc",
@@ -213,7 +257,7 @@ func TestParseRequest_AcceptsProtobufContentType(t *testing.T) {
 }
 
 func TestValidateRequest(t *testing.T) {
-	h := NewPushHandler(nil)
+	h := NewPushHandlerWithClient(nil, nil)
 
 	tests := []struct {
 		name    string
@@ -275,7 +319,7 @@ func TestValidateRequest(t *testing.T) {
 }
 
 func TestWriteResponse_StatusCodes(t *testing.T) {
-	h := NewPushHandler(nil)
+	h := NewPushHandlerWithClient(nil, nil)
 
 	tests := []struct {
 		name       string
@@ -316,7 +360,7 @@ func TestWriteResponse_StatusCodes(t *testing.T) {
 }
 
 func TestWriteResponse_IncludesRequestID(t *testing.T) {
-	h := NewPushHandler(nil)
+	h := NewPushHandlerWithClient(nil, nil)
 	rr := httptest.NewRecorder()
 
 	h.writeResponse(rr, &PushResponse{
@@ -369,7 +413,9 @@ func TestHandlePush_Success(t *testing.T) {
 			},
 		},
 	}
-	h := NewPushHandlerWithClient(mock)
+	b, cleanup := createTestBatcher(t)
+	defer cleanup()
+	h := NewPushHandlerWithClient(mock, b)
 
 	pushReq := &pb.PushRequest{
 		SenderUsername: "alice@oc",
@@ -406,7 +452,7 @@ func TestHandlePush_SignatureVerificationFailed(t *testing.T) {
 	mock := &mockOurCloudClient{
 		verifyResult: false,
 	}
-	h := NewPushHandlerWithClient(mock)
+	h := NewPushHandlerWithClient(mock, nil)
 
 	pushReq := &pb.PushRequest{
 		SenderUsername: "alice@oc",
@@ -440,7 +486,7 @@ func TestHandlePush_SignatureVerificationError(t *testing.T) {
 		verifyResult: false,
 		verifyErr:    errors.New("failed to get sender's public key"),
 	}
-	h := NewPushHandlerWithClient(mock)
+	h := NewPushHandlerWithClient(mock, nil)
 
 	pushReq := &pb.PushRequest{
 		SenderUsername: "alice@oc",
@@ -470,7 +516,7 @@ func TestHandlePush_NoConsent(t *testing.T) {
 		verifyResult:     true,
 		hasConsentResult: false,
 	}
-	h := NewPushHandlerWithClient(mock)
+	h := NewPushHandlerWithClient(mock, nil)
 
 	pushReq := &pb.PushRequest{
 		SenderUsername: "alice@oc",
@@ -505,7 +551,7 @@ func TestHandlePush_ConsentError(t *testing.T) {
 		hasConsentResult: false,
 		hasConsentErr:    errors.New("failed to get consent list"),
 	}
-	h := NewPushHandlerWithClient(mock)
+	h := NewPushHandlerWithClient(mock, nil)
 
 	pushReq := &pb.PushRequest{
 		SenderUsername: "alice@oc",
@@ -536,7 +582,7 @@ func TestHandlePush_NoEndpoints(t *testing.T) {
 		hasConsentResult: true,
 		endpointsResult:  &pb.PushEndpointList{Endpoints: nil}, // empty list
 	}
-	h := NewPushHandlerWithClient(mock)
+	h := NewPushHandlerWithClient(mock, nil)
 
 	pushReq := &pb.PushRequest{
 		SenderUsername: "alice@oc",
@@ -572,7 +618,7 @@ func TestHandlePush_EndpointsError(t *testing.T) {
 		endpointsResult:  nil,
 		endpointsErr:     errors.New("failed to get endpoints"),
 	}
-	h := NewPushHandlerWithClient(mock)
+	h := NewPushHandlerWithClient(mock, nil)
 
 	pushReq := &pb.PushRequest{
 		SenderUsername: "alice@oc",

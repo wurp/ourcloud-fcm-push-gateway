@@ -2,8 +2,8 @@ FROM golang:1.21-alpine AS builder
 
 WORKDIR /build
 
-# Install git for module downloads
-RUN apk add --no-cache git
+# Install git for module downloads and gcc/musl-dev for CGO (required by SQLite)
+RUN apk add --no-cache git gcc musl-dev
 
 # Copy source code (expects vendored dependencies or proper module setup)
 COPY . .
@@ -11,8 +11,8 @@ COPY . .
 # Download dependencies
 RUN go mod download
 
-# Build the binary
-RUN CGO_ENABLED=0 GOOS=linux go build -o pushserver ./cmd/pushserver
+# Build the binary (CGO required for SQLite)
+RUN CGO_ENABLED=1 GOOS=linux go build -o pushserver ./cmd/pushserver
 
 FROM alpine:3.19
 

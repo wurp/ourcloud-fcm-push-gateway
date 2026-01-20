@@ -13,6 +13,7 @@ type Config struct {
 	Server   ServerConfig   `yaml:"server"`
 	Firebase FirebaseConfig `yaml:"firebase"`
 	OurCloud OurCloudConfig `yaml:"ourcloud"`
+	Storage  StorageConfig  `yaml:"storage"`
 	Batch    BatchConfig    `yaml:"batch"`
 	Status   StatusConfig   `yaml:"status"`
 }
@@ -35,11 +36,16 @@ type OurCloudConfig struct {
 	GRPCAddress string `yaml:"grpc_address"`
 }
 
+// StorageConfig holds SQLite database settings.
+type StorageConfig struct {
+	Path        string        `yaml:"path"`
+	LockTimeout time.Duration `yaml:"lock_timeout"`
+}
+
 // BatchConfig holds notification batching settings.
 type BatchConfig struct {
-	Window      time.Duration `yaml:"window"`
-	MaxSize     int           `yaml:"max_size"`
-	StoragePath string        `yaml:"storage_path"`
+	Window  time.Duration `yaml:"window"`
+	MaxSize int           `yaml:"max_size"`
 }
 
 // StatusConfig holds delivery status tracking settings.
@@ -78,14 +84,17 @@ func (c *Config) setDefaults() {
 	if c.OurCloud.GRPCAddress == "" {
 		c.OurCloud.GRPCAddress = "localhost:50051"
 	}
+	if c.Storage.Path == "" {
+		c.Storage.Path = "/var/lib/pushserver/pushserver.db"
+	}
+	if c.Storage.LockTimeout == 0 {
+		c.Storage.LockTimeout = 100 * time.Millisecond
+	}
 	if c.Batch.Window == 0 {
 		c.Batch.Window = 60 * time.Second
 	}
 	if c.Batch.MaxSize == 0 {
 		c.Batch.MaxSize = 100
-	}
-	if c.Batch.StoragePath == "" {
-		c.Batch.StoragePath = "/var/lib/pushserver/batches"
 	}
 	if c.Status.Retention == 0 {
 		c.Status.Retention = time.Hour

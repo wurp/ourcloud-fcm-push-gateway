@@ -14,9 +14,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/wurp/ourcloud-fcm-push-gateway/internal/batcher"
 	"github.com/wurp/ourcloud-fcm-push-gateway/internal/config"
+	"github.com/wurp/ourcloud-fcm-push-gateway/internal/fcm"
 	"github.com/wurp/ourcloud-fcm-push-gateway/internal/handler"
 	"github.com/wurp/ourcloud-fcm-push-gateway/internal/ourcloud"
+	"github.com/wurp/ourcloud-fcm-push-gateway/internal/store"
 )
 
 func main() {
@@ -37,8 +40,43 @@ func main() {
 
 	log.Printf("Connected to OurCloud node at %s", cfg.OurCloud.GRPCAddress)
 
+	// Initialize store
+	st, err := store.New(store.Config{
+		Path: cfg.Storage.Path,
+	})
+	if err != nil {
+		log.Fatalf("Failed to initialize store: %v", err)
+	}
+	defer st.Close()
+
+	log.Printf("Initialized store at %s", cfg.Storage.Path)
+
+	// Initialize FCM sender
+	sender, err := fcm.New(context.Background(), fcm.Config{
+		CredentialsFile: cfg.Firebase.CredentialsFile,
+		ProjectID:       cfg.Firebase.ProjectID,
+	})
+	if err != nil {
+		log.Fatalf("Failed to initialize FCM sender: %v", err)
+	}
+
+	log.Printf("Initialized FCM sender")
+
+	b := batcher.New(st, sender, batcher.Config{
+		BatchWindow:     cfg.Batch.Window,
+		MaxBatchSize:    cfg.Batch.MaxSize,
+		LockTimeout:     cfg.Storage.LockTimeout,
+		StatusRetention: cfg.Status.Retention,
+	})
+	defer b.Stop()
+
+	// Recover any pending batches from previous run
+	if err := b.Recover(context.Background()); err != nil {
+		log.Fatalf("Failed to recover batches: %v", err)
+	}
+
 	// Initialize handlers
-	pushHandler := handler.NewPushHandler(ocClient)
+	pushHandler := handler.NewPushHandler(ocClient, b)
 
 	r := chi.NewRouter()
 
@@ -114,3 +152,4 @@ func makeHealthHandler(ocClient *ourcloud.Client) http.HandlerFunc {
 		json.NewEncoder(w).Encode(resp)
 	}
 }
+

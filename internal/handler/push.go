@@ -4,9 +4,10 @@ package handler
 import (
 	"context"
 	"io"
+	"log"
 	"net/http"
 
-	"github.com/google/uuid"
+	"github.com/wurp/ourcloud-fcm-push-gateway/internal/batcher"
 	"github.com/wurp/ourcloud-fcm-push-gateway/internal/ourcloud"
 	pb "github.com/wurp/friendly-backup-reboot/src/go/ourcloud-proto"
 	"google.golang.org/protobuf/proto"
@@ -32,20 +33,23 @@ type OurCloudClient interface {
 // PushHandler handles incoming push notification requests.
 type PushHandler struct {
 	ocClient OurCloudClient
+	batcher  *batcher.Batcher
 }
 
 // NewPushHandler creates a new PushHandler.
-func NewPushHandler(ocClient *ourcloud.Client) *PushHandler {
+func NewPushHandler(ocClient *ourcloud.Client, b *batcher.Batcher) *PushHandler {
 	return &PushHandler{
 		ocClient: ocClient,
+		batcher:  b,
 	}
 }
 
 // NewPushHandlerWithClient creates a new PushHandler with any OurCloudClient implementation.
 // This is useful for testing with mock clients.
-func NewPushHandlerWithClient(client OurCloudClient) *PushHandler {
+func NewPushHandlerWithClient(client OurCloudClient, b *batcher.Batcher) *PushHandler {
 	return &PushHandler{
 		ocClient: client,
+		batcher:  b,
 	}
 }
 
@@ -122,9 +126,27 @@ func (h *PushHandler) HandlePush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 5: Queue for delivery (TODO: implement batching system in phase 4)
-	// For now, generate a request ID and return success
-	requestID := uuid.New().String()
+	// Step 5: Queue for delivery to each endpoint
+	var requestID string
+	for _, endpoint := range endpoints.Endpoints {
+		rid, err := h.batcher.Queue(ctx, endpoint.FcmToken, req.DataIds)
+		if err != nil {
+			log.Printf("WARNING: failed to queue for endpoint %s: %v", endpoint.DeviceId, err)
+			continue
+		}
+		if requestID == "" {
+			requestID = rid // Return the first successful request ID
+		}
+	}
+
+	if requestID == "" {
+		h.writeResponse(w, &PushResponse{
+			Accepted:  false,
+			ErrorCode: ErrorCodeInvalidRequest,
+			Message:   "failed to queue notification",
+		})
+		return
+	}
 
 	h.writeResponse(w, &PushResponse{
 		Accepted:  true,
