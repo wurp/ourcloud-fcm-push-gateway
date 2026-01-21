@@ -26,6 +26,15 @@ func main() {
 	configPath := flag.String("config", "config.yaml", "path to configuration file")
 	flag.Parse()
 
+	// Environment variable overrides
+	if envConfig := os.Getenv("PUSHSERVER_CONFIG"); envConfig != "" {
+		*configPath = envConfig
+	}
+
+	if logLevel := os.Getenv("PUSHSERVER_LOG_LEVEL"); logLevel != "" {
+		log.Printf("Log level set to: %s", logLevel)
+	}
+
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
@@ -88,7 +97,7 @@ func main() {
 	r.Use(middleware.RequestID)
 
 	// Routes
-	r.Get("/health", makeHealthHandler(ocClient))
+	r.Get("/health", makeHealthHandler(ocClient, sender))
 	r.Post("/push", pushHandler.HandlePush)
 	r.Get("/status/{id}", statusHandler.HandleGetStatus)
 
@@ -150,30 +159,43 @@ func main() {
 type HealthResponse struct {
 	Status   string `json:"status"`
 	OurCloud string `json:"ourcloud,omitempty"`
+	Firebase string `json:"firebase,omitempty"`
 }
 
-func makeHealthHandler(ocClient *ourcloud.Client) http.HandlerFunc {
+func makeHealthHandler(ocClient *ourcloud.Client, fcmSender *fcm.Sender) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		resp := HealthResponse{
 			Status:   "ok",
 			OurCloud: "ok",
+			Firebase: "ok",
 		}
+
+		healthy := true
 
 		// Check OurCloud connectivity
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
 		if err := ocClient.HealthCheck(ctx); err != nil {
-			resp.Status = "degraded"
 			resp.OurCloud = fmt.Sprintf("error: %v", err)
-			w.WriteHeader(http.StatusServiceUnavailable)
-			json.NewEncoder(w).Encode(resp)
-			return
+			healthy = false
 		}
 
-		w.WriteHeader(http.StatusOK)
+		// Check Firebase client initialization
+		if fcmSender == nil {
+			resp.Firebase = "not initialized"
+			healthy = false
+		}
+
+		if !healthy {
+			resp.Status = "degraded"
+			w.WriteHeader(http.StatusServiceUnavailable)
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
+
 		json.NewEncoder(w).Encode(resp)
 	}
 }
