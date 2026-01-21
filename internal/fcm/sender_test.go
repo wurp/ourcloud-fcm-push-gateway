@@ -207,3 +207,131 @@ func TestNew_MissingCredentials(t *testing.T) {
 		t.Errorf("error = %q, want 'firebase credentials file is required'", err.Error())
 	}
 }
+
+func TestSend_MultipleDevices(t *testing.T) {
+	// Test sending to multiple devices sequentially
+	// This tests that the sender can handle multiple distinct FCM tokens
+	mock := &mockMessagingClient{}
+	sender := &TestableSender{mock: mock}
+
+	devices := []struct {
+		token   string
+		dataIDs [][]byte
+	}{
+		{"token-device-1", [][]byte{{0x01}}},
+		{"token-device-2", [][]byte{{0x02}}},
+		{"token-device-3", [][]byte{{0x03, 0x04}}},
+	}
+
+	for _, device := range devices {
+		err := sender.Send(context.Background(), device.token, device.dataIDs)
+		if err != nil {
+			t.Fatalf("Send() to %s error = %v", device.token, err)
+		}
+	}
+
+	// Verify all messages were sent
+	if mock.lastMsg.Token != "token-device-3" {
+		t.Errorf("last message token = %q, want %q", mock.lastMsg.Token, "token-device-3")
+	}
+}
+
+func TestSend_PartialFailure(t *testing.T) {
+	// Test that partial failure (one device fails) allows others to succeed
+	// The sender returns errors but doesn't prevent subsequent calls
+	callCount := 0
+	mock := &mockMessagingClient{
+		sendFunc: func(ctx context.Context, message *messaging.Message) (string, error) {
+			callCount++
+			// Fail on second device
+			if message.Token == "token-2" {
+				return "", errors.New("FCM: token-2 unregistered")
+			}
+			return "msg-id-" + message.Token, nil
+		},
+	}
+	sender := &TestableSender{mock: mock}
+
+	// Send to 3 devices, second one fails
+	tokens := []string{"token-1", "token-2", "token-3"}
+	var failedTokens []string
+
+	for _, token := range tokens {
+		err := sender.Send(context.Background(), token, [][]byte{{0x01}})
+		if err != nil {
+			failedTokens = append(failedTokens, token)
+		}
+	}
+
+	// Verify exactly one failure
+	if len(failedTokens) != 1 {
+		t.Errorf("expected 1 failed token, got %d: %v", len(failedTokens), failedTokens)
+	}
+	if len(failedTokens) > 0 && failedTokens[0] != "token-2" {
+		t.Errorf("expected token-2 to fail, got %s", failedTokens[0])
+	}
+
+	// Verify all 3 sends were attempted
+	if callCount != 3 {
+		t.Errorf("expected 3 send attempts, got %d", callCount)
+	}
+}
+
+func TestSend_LargeDataPayload(t *testing.T) {
+	// Test with a large number of data IDs to verify serialization handles it
+	mock := &mockMessagingClient{}
+	sender := &TestableSender{mock: mock}
+
+	// Create 100 data IDs (reasonable batch size)
+	dataIDs := make([][]byte, 100)
+	for i := range dataIDs {
+		dataIDs[i] = make([]byte, 32) // 32-byte content IDs
+		dataIDs[i][0] = byte(i)
+	}
+
+	err := sender.Send(context.Background(), "test-token", dataIDs)
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+
+	// Verify payload decodes correctly
+	payload := mock.lastMsg.Data["payload"]
+	decoded, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		t.Fatalf("failed to decode payload: %v", err)
+	}
+
+	var notification pb.DataUpdateNotification
+	if err := proto.Unmarshal(decoded, &notification); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if len(notification.DataIds) != 100 {
+		t.Errorf("expected 100 data IDs, got %d", len(notification.DataIds))
+	}
+}
+
+func TestSend_ContextCancellation(t *testing.T) {
+	// Test that context cancellation is respected
+	mock := &mockMessagingClient{
+		sendFunc: func(ctx context.Context, message *messaging.Message) (string, error) {
+			// Check if context is cancelled
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			default:
+				return "msg-id", nil
+			}
+		},
+	}
+	sender := &TestableSender{mock: mock}
+
+	// Create cancelled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := sender.Send(ctx, "test-token", [][]byte{{0x01}})
+	if err == nil {
+		t.Error("expected error for cancelled context")
+	}
+}

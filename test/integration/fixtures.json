@@ -1,0 +1,41 @@
+{
+  "users": {
+    "alice@oc": {
+      "public_sign_key": "29fc47d130310d361edce43d98356755dfeae2df52edc3e2027bcd7835207a7e",
+      "public_crypt_key": "0000000000000000000000000000000000000000000000000000000000000000",
+      "consents": ["bob@oc", "carol@oc"],
+      "endpoints": [
+        {"device_id": "alice-phone", "fcm_token": "fcm-token-alice-phone"},
+        {"device_id": "alice-tablet", "fcm_token": "fcm-token-alice-tablet"}
+      ]
+    },
+    "bob@oc": {
+      "public_sign_key": "f306ff2a70a1412518cd3933a114934dd06bac221415d7eb35417fa600241d11",
+      "public_crypt_key": "0000000000000000000000000000000000000000000000000000000000000000",
+      "consents": ["alice@oc"],
+      "endpoints": [
+        {"device_id": "bob-phone", "fcm_token": "fcm-token-bob-phone"}
+      ]
+    },
+    "carol@oc": {
+      "public_sign_key": "892278e5527b11d098c543a803d19bb3c1989ded9b9918d1900533b34e156dfd",
+      "public_crypt_key": "0000000000000000000000000000000000000000000000000000000000000000",
+      "consents": [],
+      "endpoints": [
+        {"device_id": "carol-phone", "fcm_token": "fcm-token-carol-phone"}
+      ]
+    },
+    "nodevice@oc": {
+      "public_sign_key": "ec7366998d4386e40be44bc6d381790d2e5fd6acbdc961c898ef29e4f67b5cf3",
+      "public_crypt_key": "0000000000000000000000000000000000000000000000000000000000000000",
+      "consents": ["alice@oc"],
+      "endpoints": []
+    },
+    "root@oc": {
+      "public_sign_key": "ef5b49aaf3cff4faf35534de2da110bbd333f810c4978c97b9c16d919ba0bfb7",
+      "public_crypt_key": "0000000000000000000000000000000000000000000000000000000000000000",
+      "consents": [],
+      "endpoints": []
+    }
+  }
+}

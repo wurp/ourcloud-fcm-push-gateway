@@ -29,6 +29,8 @@ type ServerConfig struct {
 type FirebaseConfig struct {
 	CredentialsFile string `yaml:"credentials_file"`
 	ProjectID       string `yaml:"project_id"`
+	// Endpoint overrides the FCM API endpoint (for testing only).
+	Endpoint string `yaml:"endpoint,omitempty"`
 }
 
 // OurCloudConfig holds OurCloud DHT connection settings.

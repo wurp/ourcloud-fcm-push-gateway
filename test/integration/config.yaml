@@ -1,0 +1,26 @@
+# Integration test configuration
+# Points to local stub services
+
+server:
+  port: 8085
+  read_timeout: 10s
+  write_timeout: 10s
+
+firebase:
+  credentials_file: fake-credentials.json
+  project_id: test-project
+  endpoint: http://localhost:9099
+
+ourcloud:
+  grpc_address: localhost:50052
+
+storage:
+  path: /tmp/pushserver-integration-test.db
+  lock_timeout: 100ms
+
+batch:
+  window: 100ms   # Short window for faster tests
+  max_size: 10
+
+status:
+  retention: 1h

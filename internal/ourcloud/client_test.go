@@ -150,3 +150,98 @@ func equal(a, b []byte) bool {
 	}
 	return true
 }
+
+// checkConsentInList is a pure function extracted for testing consent checking logic.
+// This mirrors the logic in Client.HasConsent but without DHT dependency.
+func checkConsentInList(consentList *pb.PushConsentList, senderUsername string) bool {
+	if consentList == nil {
+		return false
+	}
+	for _, consent := range consentList.Consents {
+		if consent.Username == senderUsername {
+			return true
+		}
+	}
+	return false
+}
+
+func TestCheckConsentInList_SenderInList(t *testing.T) {
+	consentList := &pb.PushConsentList{
+		Consents: []*pb.PushConsent{
+			{Username: "alice@oc"},
+			{Username: "bob@oc"},
+			{Username: "carol@oc"},
+		},
+	}
+
+	if !checkConsentInList(consentList, "alice@oc") {
+		t.Error("expected alice@oc to be in consent list")
+	}
+	if !checkConsentInList(consentList, "bob@oc") {
+		t.Error("expected bob@oc to be in consent list")
+	}
+	if !checkConsentInList(consentList, "carol@oc") {
+		t.Error("expected carol@oc to be in consent list")
+	}
+}
+
+func TestCheckConsentInList_SenderNotInList(t *testing.T) {
+	consentList := &pb.PushConsentList{
+		Consents: []*pb.PushConsent{
+			{Username: "alice@oc"},
+			{Username: "bob@oc"},
+		},
+	}
+
+	if checkConsentInList(consentList, "eve@oc") {
+		t.Error("expected eve@oc to NOT be in consent list")
+	}
+	if checkConsentInList(consentList, "mallory@oc") {
+		t.Error("expected mallory@oc to NOT be in consent list")
+	}
+}
+
+func TestCheckConsentInList_EmptyList(t *testing.T) {
+	// Empty consents slice
+	consentList := &pb.PushConsentList{
+		Consents: []*pb.PushConsent{},
+	}
+
+	if checkConsentInList(consentList, "alice@oc") {
+		t.Error("expected false for empty consent list")
+	}
+}
+
+func TestCheckConsentInList_NilList(t *testing.T) {
+	// Nil consent list (fail closed - no consent)
+	if checkConsentInList(nil, "alice@oc") {
+		t.Error("expected false for nil consent list")
+	}
+}
+
+func TestCheckConsentInList_NilConsentsSlice(t *testing.T) {
+	// ConsentList exists but Consents is nil
+	consentList := &pb.PushConsentList{
+		Consents: nil,
+	}
+
+	if checkConsentInList(consentList, "alice@oc") {
+		t.Error("expected false for nil consents slice")
+	}
+}
+
+func TestCheckConsentInList_CaseSensitive(t *testing.T) {
+	consentList := &pb.PushConsentList{
+		Consents: []*pb.PushConsent{
+			{Username: "alice@oc"},
+		},
+	}
+
+	// Username matching should be case-sensitive
+	if checkConsentInList(consentList, "Alice@oc") {
+		t.Error("expected case-sensitive matching (Alice@oc should not match alice@oc)")
+	}
+	if checkConsentInList(consentList, "ALICE@OC") {
+		t.Error("expected case-sensitive matching (ALICE@OC should not match alice@oc)")
+	}
+}

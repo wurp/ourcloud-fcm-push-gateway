@@ -55,6 +55,7 @@ func main() {
 	sender, err := fcm.New(context.Background(), fcm.Config{
 		CredentialsFile: cfg.Firebase.CredentialsFile,
 		ProjectID:       cfg.Firebase.ProjectID,
+		Endpoint:        cfg.Firebase.Endpoint,
 	})
 	if err != nil {
 		log.Fatalf("Failed to initialize FCM sender: %v", err)

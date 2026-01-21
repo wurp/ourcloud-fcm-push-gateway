@@ -19,6 +19,9 @@ import (
 type Config struct {
 	CredentialsFile string
 	ProjectID       string
+	// Endpoint overrides the FCM API endpoint (for testing only).
+	// If empty, the default FCM endpoint is used.
+	Endpoint string
 }
 
 // Sender sends notifications to devices via Firebase Cloud Messaging.
@@ -35,6 +38,9 @@ func New(ctx context.Context, cfg Config) (*Sender, error) {
 
 	var opts []option.ClientOption
 	opts = append(opts, option.WithCredentialsFile(cfg.CredentialsFile))
+	if cfg.Endpoint != "" {
+		opts = append(opts, option.WithEndpoint(cfg.Endpoint))
+	}
 
 	firebaseConfig := &firebase.Config{}
 	if cfg.ProjectID != "" {
